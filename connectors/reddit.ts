@@ -84,6 +84,8 @@ export default class RedditConnector extends ConnectorRuntime {
           type: 'oauth',
           provider: 'reddit',
           requiredScopes: ['read', 'history'],
+          setupInstructions:
+            'Create a Reddit app at https://www.reddit.com/prefs/apps as a web app. Set the redirect URI to your Owletto Reddit OAuth callback, then copy the client ID and secret into the app profile form.',
         },
         {
           type: 'none',
