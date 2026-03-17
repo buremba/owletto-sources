@@ -1,0 +1,117 @@
+{
+  "slug": "reddit-opportunity-finder",
+  "name": "Reddit Opportunity Finder",
+  "description": "Scan Reddit for posts where people describe problems your product solves. Scores relevance, identifies recurring themes, and drafts helpful non-spammy replies for high-fit opportunities.",
+  "version": 1,
+  "prompt": "You are a product-market fit analyst scanning Reddit discussions for people who have problems that the monitored product can solve.\n\nFor each post, evaluate:\n1. Does the author describe a problem the product addresses? Score relevance 1-10.\n2. Only surface posts scoring 6 or above.\n3. For each qualifying post, draft a reply that:\n   - Addresses the specific problem the author described\n   - Mentions the product naturally as one option among potential solutions\n   - Provides genuine value even if the reader never clicks a link\n   - Avoids marketing language, superlatives, or pushy CTAs\n   - Reads as a helpful community member, not a marketer\n4. Classify urgency: \"high\" if the author needs a solution now, \"medium\" if exploring options, \"low\" if general discussion.\n\nAlso identify:\n- Recurring problem themes across posts (group similar pain points)\n- Signal-to-noise ratio per subreddit (what % of posts are relevant)\n\nOnly include posts with relevance_score >= 6 in the opportunities array.",
+  "extraction_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "object",
+        "properties": {
+          "posts_analyzed": { "type": "integer" },
+          "opportunities_found": { "type": "integer" },
+          "avg_relevance": { "type": "number" }
+        }
+      },
+      "opportunities": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "author": { "type": "string" },
+            "subreddit": { "type": "string" },
+            "url": { "type": "string" },
+            "problem_description": { "type": "string" },
+            "relevance_score": { "type": "integer", "minimum": 6, "maximum": 10 },
+            "relevance_reason": { "type": "string" },
+            "urgency": { "type": "string", "enum": ["high", "medium", "low"] },
+            "drafted_reply": { "type": "string" }
+          }
+        }
+      },
+      "themes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "theme": { "type": "string" },
+            "mention_count": { "type": "integer" }
+          }
+        }
+      },
+      "subreddit_quality": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "subreddit": { "type": "string" },
+            "signal_ratio": { "type": "number" },
+            "total_posts": { "type": "integer" },
+            "relevant_posts": { "type": "integer" }
+          }
+        }
+      }
+    }
+  },
+  "data_sources": {
+    "posts": {
+      "type": "signals",
+      "filters": {
+        "limit": 200
+      }
+    }
+  },
+  "json_template": {
+    "type": "layout",
+    "direction": "vertical",
+    "children": [
+      {
+        "type": "columns",
+        "children": [
+          { "type": "metric", "label": "Posts Analyzed", "value": "{{summary.posts_analyzed}}" },
+          { "type": "metric", "label": "Opportunities Found", "value": "{{summary.opportunities_found}}" },
+          { "type": "metric", "label": "Avg Relevance", "value": "{{summary.avg_relevance}}" }
+        ]
+      },
+      {
+        "type": "table",
+        "title": "Opportunities",
+        "data": "{{opportunities}}",
+        "columns": ["relevance_score", "subreddit", "title", "urgency", "problem_description"]
+      },
+      {
+        "type": "table",
+        "title": "Problem Themes",
+        "data": "{{themes}}",
+        "columns": ["theme", "mention_count"]
+      },
+      {
+        "type": "table",
+        "title": "Subreddit Quality",
+        "data": "{{subreddit_quality}}",
+        "columns": ["subreddit", "signal_ratio", "total_posts", "relevant_posts"]
+      }
+    ]
+  },
+  "classifiers": [
+    {
+      "slug": "opportunity-urgency",
+      "name": "Opportunity Urgency",
+      "source_path": "$.opportunities[*]",
+      "value_field": "urgency"
+    },
+    {
+      "slug": "problem-theme",
+      "name": "Problem Theme",
+      "source_path": "$.themes[*]",
+      "value_field": "theme"
+    }
+  ],
+  "source_types": {
+    "required": [],
+    "recommended": ["reddit"]
+  }
+}
