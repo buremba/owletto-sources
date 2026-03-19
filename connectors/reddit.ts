@@ -165,7 +165,11 @@ export default class RedditConnector extends ConnectorRuntime {
     const contentType = (ctx.config.content_type as string) ?? 'post';
     const lookbackDays = (ctx.config.lookback_days as number) ?? 365;
 
-    const accessToken = ctx.credentials?.accessToken;
+    // Resolve access token: user OAuth > app-only OAuth > unauthenticated
+    let accessToken = ctx.credentials?.accessToken;
+    if (!accessToken) {
+      accessToken = await this.getAppOnlyToken(ctx);
+    }
     const baseUrl = accessToken ? 'https://oauth.reddit.com' : 'https://www.reddit.com';
 
     const cutoffDate = new Date();
@@ -269,6 +273,43 @@ export default class RedditConnector extends ConnectorRuntime {
 
   async execute(_ctx: ActionContext): Promise<ActionResult> {
     return { success: false, error: 'Actions not supported' };
+  }
+
+  // -------------------------------------------------------------------------
+  // App-only OAuth
+  // -------------------------------------------------------------------------
+
+  private appOnlyToken: string | null = null;
+
+  private async getAppOnlyToken(ctx: SyncContext): Promise<string | undefined> {
+    if (this.appOnlyToken) return this.appOnlyToken;
+
+    const clientId = (ctx.config as Record<string, unknown>).REDDIT_CLIENT_ID as string | undefined;
+    const clientSecret = (ctx.config as Record<string, unknown>).REDDIT_CLIENT_SECRET as string | undefined;
+    if (!clientId || !clientSecret) return undefined;
+
+    const userAgent = ((ctx.config as Record<string, unknown>).REDDIT_USER_AGENT as string) || this.USER_AGENT;
+    const response = await fetch('https://www.reddit.com/api/v1/access_token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+        'User-Agent': userAgent,
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+    if (!response.ok) {
+      console.error(`Reddit app-only auth failed (${response.status}), falling back to unauthenticated`);
+      return undefined;
+    }
+
+    const data = (await response.json()) as { access_token?: string };
+    if (data.access_token) {
+      this.appOnlyToken = data.access_token;
+      return data.access_token;
+    }
+    return undefined;
   }
 
   // -------------------------------------------------------------------------
