@@ -1,0 +1,34 @@
+{
+  "manifest_version": 1,
+  "slug": "midas",
+  "name": "Midas",
+  "description": "Crawls Midas Atlas portfolio",
+  "type": "midas",
+  "api_type": "browser",
+  "crawler_type": "entity",
+  "file": "crawlers/midas.ts",
+  "has_discover": false,
+  "options_schema": {
+    "description": "Midas crawler options - requires trusted browser session",
+    "$id": "MidasOptions",
+    "type": "object",
+    "required": [
+      "dashboard_url"
+    ],
+    "properties": {
+      "dashboard_url": {
+        "description": "Full Midas Atlas dashboard URL (e.g., \"https://atlas.getmidas.com/dashboard/...\")",
+        "format": "uri",
+        "pattern": "^https://atlas\\.getmidas\\.com/dashboard/",
+        "type": "string"
+      }
+    }
+  },
+  "auth_schema": {
+    "methods": [
+      {
+        "type": "none"
+      }
+    ]
+  }
+}
