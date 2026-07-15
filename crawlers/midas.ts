@@ -7,7 +7,6 @@ import { type Static, Type } from '@owletto/sdk';
 import type { Page } from 'playwright';
 import { logger } from '@owletto/sdk';
 import type { Content, CrawlerOptions, Env, SearchResult } from '@owletto/sdk';
-import { calculateEngagementScore } from '@owletto/sdk';
 import {
   type BrowserCrawlerConfig,
   BrowserPaginatedCrawler,
@@ -35,13 +34,19 @@ interface MidasCheckpoint extends PaginatedCheckpoint {}
 
 interface MidasAsset {
   symbol: string;
-  name: string;
-  shares: string;
+  shares: number;
   price: string;
-  total: string;
+  value: string;
 }
 
-export class MidasCrawler extends BrowserPaginatedCrawler<MidasAsset, MidasCheckpoint> {
+interface MidasPortfolio {
+  total_usd: string;
+  total_try: string;
+  holdings: MidasAsset[];
+  raw_text?: string;
+}
+
+export class MidasCrawler extends BrowserPaginatedCrawler<MidasPortfolio, MidasCheckpoint> {
   readonly type = 'midas';
   readonly displayName = 'Midas';
   readonly crawlerType = 'entity' as const;
@@ -90,7 +95,7 @@ export class MidasCrawler extends BrowserPaginatedCrawler<MidasAsset, MidasCheck
   protected getBrowserPaginationConfig(): BrowserPaginationConfig {
     return {
       maxPages: 1,
-      pageSize: 100,
+      pageSize: 1,
       rateLimitMs: 2000,
       incrementalCheckpoint: true,
       pagesPerRun: 1,
@@ -108,51 +113,114 @@ export class MidasCrawler extends BrowserPaginatedCrawler<MidasAsset, MidasCheck
 
   protected async waitForContent(page: Page): Promise<void> {
     try {
-      // Just wait for body, midas loads quickly in the SPA
       await page.waitForSelector('body', { timeout: 10000 });
-      await page.waitForTimeout(3000); // Wait for positions to render
+      await page.waitForTimeout(3000); 
     } catch (_error) {
       logger.warn(`[${this.type}] timeout waiting for Midas dashboard`);
     }
   }
 
-  protected async extractItems(page: Page): Promise<MidasAsset[]> {
+  protected async extractItems(page: Page): Promise<MidasPortfolio[]> {
     return page.evaluate(() => {
-      // In this quick implementation we just pull the raw text since Midas uses complex virtual grids.
-      // A more robust implementation would use precise DOM queries on the flex grid columns.
-      // We return a single pseudo-asset representing the raw scrape, which can be parsed downstream.
       const text = document.body.innerText;
+      const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
+      
+      const holdings: any[] = [];
+      
+      // We will parse the text dynamically based on known markers
+      // Look for "ABD Hisseleri"
+      const usStartIdx = lines.indexOf("ABD Hisseleri");
+      const trStartIdx = lines.indexOf("BIST Hisseleri");
+      
+      let usTickers = [];
+      let trTickers = [];
+      
+      if (usStartIdx !== -1 && trStartIdx !== -1) {
+        usTickers = lines.slice(usStartIdx + 1, trStartIdx);
+      }
+      
+      let nextIdx = trStartIdx !== -1 ? trStartIdx + 1 : -1;
+      while (nextIdx < lines.length && isNaN(parseInt(lines[nextIdx]))) {
+        trTickers.push(lines[nextIdx]);
+        nextIdx++;
+      }
+      
+      // Parse US holdings values
+      let currentIdx = nextIdx;
+      let totalUsd = "0";
+      let totalTry = "0";
+      
+      if (currentIdx < lines.length) {
+        // Skip US totals
+        const numUs = parseInt(lines[currentIdx]); // e.g. 17
+        currentIdx++;
+        totalUsd = lines[currentIdx]; // e.g. $991.792,83
+        currentIdx += 3; // skip daily/total return
+        
+        for (let i = 0; i < usTickers.length; i++) {
+          holdings.push({
+            symbol: usTickers[i],
+            shares: parseFloat(lines[currentIdx]?.replace(',', '.') || '0'),
+            price: lines[currentIdx+1],
+            value: lines[currentIdx+3],
+            type: 'US'
+          });
+          currentIdx += 7; // 7 fields per row
+        }
+      }
+      
+      // Parse TR holdings values
+      if (currentIdx < lines.length) {
+        // Skip TR totals
+        const numTr = parseInt(lines[currentIdx]); // e.g. 5
+        currentIdx++;
+        totalTry = lines[currentIdx];
+        currentIdx += 3;
+        
+        for (let i = 0; i < trTickers.length; i++) {
+          holdings.push({
+            symbol: trTickers[i],
+            shares: parseFloat(lines[currentIdx]?.replace('.', '').replace(',', '.') || '0'),
+            price: lines[currentIdx+1],
+            value: lines[currentIdx+3],
+            type: 'TR'
+          });
+          currentIdx += 7;
+        }
+      }
+
       return [{
-        symbol: "PORTFOLIO",
-        name: "Midas Portfolio Raw Export",
-        shares: "1",
-        price: "0",
-        total: text
+        total_usd: totalUsd,
+        total_try: totalTry,
+        holdings: holdings.length > 0 ? holdings : [],
+        raw_text: text
       }];
     });
   }
 
-  protected transformItem(item: MidasAsset, options: CrawlerOptions): Content {
+  protected transformItem(item: MidasPortfolio, options: CrawlerOptions): Content {
     return {
       external_id: `midas-portfolio-${Date.now()}`,
-      title: item.name,
-      content: item.total, // Raw text goes in content
+      title: 'Midas Portfolio',
+      content: '', // Left empty to be rendered dynamically by Lobu View Template
       author: 'Midas',
       published_at: new Date(),
       score: 100,
       url: this.getBaseUrl(options),
       metadata: {
-        symbol: item.symbol,
+        total_usd: item.total_usd,
+        total_try: item.total_try,
+        holdings: item.holdings,
         type: 'portfolio_export'
       },
     };
   }
 
-  protected getItemDate(item: MidasAsset): Date {
+  protected getItemDate(item: MidasPortfolio): Date {
     return new Date();
   }
 
-  protected filterItem(item: MidasAsset, _options: CrawlerOptions): boolean {
+  protected filterItem(item: MidasPortfolio, _options: CrawlerOptions): boolean {
     return true;
   }
 
